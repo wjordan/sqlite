@@ -13,6 +13,7 @@
 ** for generating VDBE code that evaluates expressions in SQLite.
 */
 #include "sqliteInt.h"
+#include "whereInt.h"
 
 /* Forward declarations */
 static void exprCodeBetween(Parse*,Expr*,int,void(*)(Parse*,Expr*,int,int),int);
