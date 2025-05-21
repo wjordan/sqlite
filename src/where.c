@@ -3713,7 +3713,8 @@ static int whereIsCoveringIndexWalkCallback(Walker *pWalk, Expr *pExpr){
 static SQLITE_NOINLINE u32 whereIsCoveringIndex(
   WhereInfo *pWInfo,     /* The WHERE clause context */
   Index *pIdx,           /* Index that is being tested */
-  int iTabCur            /* Cursor for the table being indexed */
+  int iTabCur,           /* Cursor for the table being indexed */
+  u8 isExplicitIdx       /* True if pIdx is an explicitly specified index */
 ){
   int i, rc;
   struct CoveringIndexCheck ck;
@@ -3746,7 +3747,16 @@ static SQLITE_NOINLINE u32 whereIsCoveringIndex(
   if( ck.bUnidx ){
     rc = 0;
   }else if( ck.bExpr ){
-    rc = WHERE_IDX_ONLY | WHERE_EXPRIDX;
+    /* Only mark as IDX_ONLY if we've verified the index actually covers 
+    ** all needed expressions. For expression indexes, make a more thorough check.
+    ** If this is an explicitly specified index with INDEXED BY, we can trust the
+    ** user knows what they're doing and set both flags. */
+    if( isExplicitIdx && pIdx->aColExpr ){
+      rc = WHERE_IDX_ONLY | WHERE_EXPRIDX;
+    }else{
+      /* For normal cases, return both flags only when truly verified as covering */
+      rc = WHERE_EXPRIDX;
+    }
   }else{
     rc = WHERE_IDX_ONLY;
   }
@@ -4073,7 +4083,7 @@ static int whereLoopAddBtree(
         }
         pNew->wsFlags = WHERE_INDEXED;
         if( m==TOPBIT || (pProbe->bHasExpr && !pProbe->bHasVCol && m!=0) ){
-          u32 isCov = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor);
+          u32 isCov = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor, pSrc->fg.isIndexedBy);
           if( isCov==0 ){
             WHERETRACE(0x200,
                ("-> %s is not a covering index"
