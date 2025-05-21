@@ -3747,15 +3747,11 @@ static SQLITE_NOINLINE u32 whereIsCoveringIndex(
   if( ck.bUnidx ){
     rc = 0;
   }else if( ck.bExpr ){
-    /* Only mark as IDX_ONLY if we've verified the index actually covers 
-    ** all needed expressions. For expression indexes, make a more thorough check.
-    ** If this is an explicitly specified index with INDEXED BY, we can trust the
-    ** user knows what they're doing and set both flags. */
+    rc = WHERE_EXPRIDX;
     if( isExplicitIdx && pIdx->aColExpr ){
-      rc = WHERE_IDX_ONLY | WHERE_EXPRIDX;
-    }else{
-      /* For normal cases, return both flags only when truly verified as covering */
-      rc = WHERE_EXPRIDX;
+      /* If the index is explicitly specified with INDEXED BY,
+       * trust it as a covering index without opening the main table. */
+      rc |= WHERE_IDX_ONLY;
     }
   }else{
     rc = WHERE_IDX_ONLY;
