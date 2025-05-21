@@ -4096,13 +4096,20 @@ static int whereLoopAddBtree(
                 "(bFilterNoOmit=%x && m=%llx)\n",
                 pProbe->zName, bFilterNoOmit, (sqlite3_uint64)m));
           }else{
-            /* Set the appropriate flags based on the covering index type */
-            if( isCov==WHERE_IDX_ONLY ){
-              pNew->wsFlags |= WHERE_IDX_ONLY;
-              WHERETRACE(0x200,("-> %s is a covering index\n", pProbe->zName));
-            }else if( isCov==WHERE_EXPRIDX ){
-              pNew->wsFlags |= WHERE_EXPRIDX | WHERE_IDX_ONLY;
-              WHERETRACE(0x200,("-> %s is a covering index with expressions\n", pProbe->zName));
+            /* If this is an explicitly specified index with expressions, 
+              set both flags to ensure it can be used as a covering index */
+            if( pSrc->fg.isIndexedBy && pProbe->bHasExpr && pProbe->aColExpr ) {
+              pNew->wsFlags |= WHERE_IDX_ONLY | WHERE_EXPRIDX;
+              WHERETRACE(0x200,("-> %s is forced as a covering expression index\n", pProbe->zName));
+            }else{
+              /* Handle normally for other cases */
+              if( isCov==WHERE_IDX_ONLY ){
+                pNew->wsFlags |= WHERE_IDX_ONLY;
+                WHERETRACE(0x200,("-> %s is a covering index\n", pProbe->zName));
+              }else if( isCov==WHERE_EXPRIDX || isCov==(WHERE_IDX_ONLY|WHERE_EXPRIDX) ){
+                pNew->wsFlags |= WHERE_EXPRIDX | WHERE_IDX_ONLY;
+                WHERETRACE(0x200,("-> %s is a covering index with expressions\n", pProbe->zName));
+              }
             }
           }
         }else if( m==0 
