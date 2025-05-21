@@ -4089,27 +4089,6 @@ static int whereLoopAddBtree(
         }
         pNew->wsFlags = WHERE_INDEXED;
         if( m==TOPBIT || (pProbe->bHasExpr && !pProbe->bHasVCol && m!=0) ){
-          u32 isCov = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor);
-          if( isCov==0 ){
-            WHERETRACE(0x200,
-               ("-> %s is not a covering index"
-                " according to whereIsCoveringIndex()\n", pProbe->zName));
-            assert( m!=0 );
-          }else{
-            m = 0;
-            pNew->wsFlags |= isCov;
-            if( isCov & WHERE_IDX_ONLY ){
-              WHERETRACE(0x200,
-                 ("-> %s is a covering expression index"
-                  " according to whereIsCoveringIndex()\n", pProbe->zName));
-            }else{
-              assert( isCov==WHERE_EXPRIDX );
-              WHERETRACE(0x200,
-                 ("-> %s might be a covering expression index"
-                  " according to whereIsCoveringIndex()\n", pProbe->zName));
-            }
-          }
-        if( m==TOPBIT || (pProbe->bHasExpr && !pProbe->bHasVCol && m!=0) ){
           u32 isCov = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor, pSrc->fg.isIndexedBy);
           if( isCov==0 ){
             WHERETRACE(0x200,
