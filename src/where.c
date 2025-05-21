@@ -7685,8 +7685,8 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
   /* Final cleanup
   */
   pParse->nQueryLoop = pWInfo->savedNQueryLoop;
+  pParse->pWInfo = 0;
   whereInfoFree(db, pWInfo);
   pParse->withinRJSubrtn -= nRJ;
-  pWInfo->pParse->pWInfo = 0;
   return;
 }
