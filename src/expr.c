@@ -4303,6 +4303,40 @@ void sqlite3ExprCodeGetColumnOfTable(
         sqlite3ErrorMsg(pParse, "generated column loop on \"%s\"",
                         pCol->zCnName);
       }else{
+        /* Check if the column value can be fetched from a covering index */
+        if( pParse->pWInfo ){
+          WhereInfo *pWInfo = pParse->pWInfo;
+          int iLevel;
+          for(iLevel=0; iLevel<pWInfo->nLevel; iLevel++){
+            WhereLevel *pLevel = &pWInfo->a[iLevel];
+            if( pLevel->iTabCur == iTabCur ){
+              WhereLoop *pLoop = pLevel->pWLoop;
+              /* Check if an explicitly specified index is covering and has expressions */
+              if( pLoop && (pLoop->wsFlags & (WHERE_IDX_ONLY|WHERE_EXPRIDX)) ){
+                Index *pIdx = pLoop->u.btree.pIndex;
+                if( pIdx && pIdx->aColExpr ){
+                  Expr *pDefExpr = sqlite3ColumnExpr(pTab, pCol);
+                  int k;
+                  for(k=0; k<pIdx->nColumn; k++){
+                    if( pIdx->aiColumn[k]==XN_EXPR
+                      && sqlite3ExprCompare(0, pIdx->aColExpr->a[k].pExpr, pDefExpr, iTabCur)==0
+                    ){
+                      /* Found the virtual column's expression in the index. Fetch it. */
+                      sqlite3VdbeAddOp3(v, OP_Column, pLevel->iIdxCur, k, regOut);
+                      VdbeComment((v, "virtual %s from %s", pCol->zCnName, pIdx->zName));
+                      sqlite3ColumnApplyAffinity(v, regOut, pCol->affinity);
+                      /* pDefExpr is not duplicated by sqlite3ColumnExpr, so no delete needed */
+                      return;
+                    }
+                  }
+                }
+              }
+              break; /* Found the WhereLevel for iTabCur */
+            }
+          }
+        }
+
+        /* Fallback to recomputing the generated column */
         int savedSelfTab = pParse->iSelfTab;
         pCol->colFlags |= COLFLAG_BUSY;
         pParse->iSelfTab = iTabCur+1;

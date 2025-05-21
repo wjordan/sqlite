@@ -766,4 +766,354 @@ do_execsql_test index-23.1 {
   REINDEX;
 } {0.1}
 
+#-------------------------------------------------------------------------
+# Tests for virtual generated columns and explicitly specified covering indexes.
+#
+
+ifcapable {generated_columns && without_rowid} {
+  do_test index-vcov-1.1 {
+    execsql {
+      CREATE TABLE t_gen_wr (
+        id INTEGER PRIMARY KEY,
+        data TEXT,
+        gen_virt AS (id || ':' || upper(data)) VIRTUAL
+      ) WITHOUT ROWID;
+      INSERT INTO t_gen_wr(id, data) VALUES (1, 'one'), (2, 'two'), (3, 'three');
+
+      CREATE INDEX idx_gen_virt_vc_wr ON t_gen_wr(gen_virt);
+      CREATE INDEX idx_gen_virt_vc_data_wr ON t_gen_wr(gen_virt, data);
+      CREATE INDEX idx_gen_virt_id_vc_wr ON t_gen_wr(id, gen_virt);
+    }
+  } {}
+
+  # EQP Tests for t_gen_wr
+  do_eqp_test index-vcov-1.2 {
+    SELECT gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_vc_wr WHERE gen_virt = '2:TWO';
+  } {/SEARCH t_gen_wr USING COVERING INDEX idx_gen_virt_vc_wr/}
+
+  do_eqp_test index-vcov-1.3 {
+    SELECT id, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_id_vc_wr WHERE id = 2;
+  } {/SEARCH t_gen_wr USING COVERING INDEX idx_gen_virt_id_vc_wr/}
+
+  do_eqp_test index-vcov-1.4 {
+    SELECT data, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_vc_data_wr WHERE data = 'two';
+  } {/SEARCH t_gen_wr USING COVERING INDEX idx_gen_virt_vc_data_wr/}
+
+  # This should NOT be covering for 'data'
+  do_eqp_test index-vcov-1.5 {
+    SELECT id, data, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_id_vc_wr WHERE id = 1;
+  } {/SEARCH t_gen_wr USING INDEX idx_gen_virt_id_vc_wr/}
+  # Verify the above EQP does not say COVERING
+  do_eqp_test index-vcov-1.5.notcovering {
+    SELECT id, data, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_id_vc_wr WHERE id = 1;
+  } {/(?!COVERING)SEARCH t_gen_wr USING INDEX idx_gen_virt_id_vc_wr/}
+
+
+  # Result Correctness Tests for t_gen_wr
+  do_test index-vcov-1.6 {
+    execsql {
+      SELECT gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_vc_wr WHERE gen_virt = '2:TWO';
+    }
+  } {{2:TWO}}
+
+  do_test index-vcov-1.7 {
+    execsql {
+      SELECT id, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_id_vc_wr WHERE id = 2;
+    }
+  } {{2 2:TWO}}
+
+  do_test index-vcov-1.8 {
+    execsql {
+      SELECT data, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_vc_data_wr WHERE data = 'two';
+    }
+  } {{two 2:TWO}}
+
+  do_test index-vcov-1.9 {
+    execsql {
+      SELECT id, data, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_id_vc_wr WHERE id = 1;
+    }
+  } {{1 one 1:ONE}}
+
+  do_test index-vcov-1.10 {
+    execsql {
+      SELECT id, gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_vc_wr WHERE id = 3; -- id not in this index, forces lookup
+    }
+  } {{3 3:THREE}}
+
+  # EQP test where id is in PK but not in the explicit index idx_gen_virt_vc_wr
+  # The virtual column gen_virt depends on id.
+  # If gen_virt can be computed from the index, it's covering for gen_virt.
+  # But the WHERE clause on `id` might force a table scan or PK lookup if `id` itself is not in the index.
+  # However, for WITHOUT ROWID, id IS the rowid and part of the PK.
+  # The crucial part is if `gen_virt` is fetched from the index.
+  # If the query optimizer decides to use the PK for `id` and then idx_gen_virt_vc_wr for gen_virt,
+  # it's not a simple "COVERING" scan of idx_gen_virt_vc_wr.
+  # Let's test selecting only gen_virt.
+  do_eqp_test index-vcov-1.11 {
+    SELECT gen_virt FROM t_gen_wr INDEXED BY idx_gen_virt_vc_wr WHERE id = 1;
+  } {/SEARCH t_gen_wr USING INDEX idx_gen_virt_vc_wr/}
+  # It should use the index, but it won't be "COVERING" for the `id` in WHERE.
+
+}
+
+ifcapable generated_columns {
+  do_test index-vcov-2.1 {
+    execsql {
+      CREATE TABLE t_gen_std (
+        id INTEGER PRIMARY KEY,
+        data TEXT,
+        gen_virt AS (id || ':' || upper(data)) VIRTUAL
+      );
+      INSERT INTO t_gen_std(id, data) VALUES (1, 'one'), (2, 'two'), (3, 'three');
+
+      CREATE INDEX idx_gen_virt_vc_std ON t_gen_std(gen_virt);
+      CREATE INDEX idx_gen_virt_vc_data_std ON t_gen_std(gen_virt, data);
+      CREATE INDEX idx_gen_virt_id_vc_std ON t_gen_std(id, gen_virt);
+    }
+  } {}
+
+  # EQP Tests for t_gen_std
+  do_eqp_test index-vcov-2.2 {
+    SELECT gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_vc_std WHERE gen_virt = '2:TWO';
+  } {/SEARCH t_gen_std USING COVERING INDEX idx_gen_virt_vc_std/}
+
+  do_eqp_test index-vcov-2.3 {
+    SELECT id, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_id_vc_std WHERE id = 2;
+  } {/SEARCH t_gen_std USING COVERING INDEX idx_gen_virt_id_vc_std/}
+
+  do_eqp_test index-vcov-2.4 {
+    SELECT data, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_vc_data_std WHERE data = 'two';
+  } {/SEARCH t_gen_std USING COVERING INDEX idx_gen_virt_vc_data_std/}
+  
+  # This should NOT be covering for 'data'
+  do_eqp_test index-vcov-2.5 {
+    SELECT id, data, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_id_vc_std WHERE id = 1;
+  } {/SEARCH t_gen_std USING INDEX idx_gen_virt_id_vc_std/}
+  # Verify the above EQP does not say COVERING
+  do_eqp_test index-vcov-2.5.notcovering {
+    SELECT id, data, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_id_vc_std WHERE id = 1;
+  } {/(?!COVERING)SEARCH t_gen_std USING INDEX idx_gen_virt_id_vc_std/}
+
+  # Result Correctness Tests for t_gen_std
+  do_test index-vcov-2.6 {
+    execsql {
+      SELECT gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_vc_std WHERE gen_virt = '2:TWO';
+    }
+  } {{2:TWO}}
+
+  do_test index-vcov-2.7 {
+    execsql {
+      SELECT id, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_id_vc_std WHERE id = 2;
+    }
+  } {{2 2:TWO}}
+
+  do_test index-vcov-2.8 {
+    execsql {
+      SELECT data, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_vc_data_std WHERE data = 'two';
+    }
+  } {{two 2:TWO}}
+
+  do_test index-vcov-2.9 {
+    execsql {
+      SELECT id, data, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_id_vc_std WHERE id = 1;
+    }
+  } {{1 one 1:ONE}}
+  
+  do_test index-vcov-2.10 {
+    execsql {
+      SELECT id, gen_virt FROM t_gen_std INDEXED BY idx_gen_virt_vc_std WHERE id = 3;
+    }
+  } {{3 3:THREE}}
+}
+
+# Tests for complex generated expressions (e.g., using functions)
+ifcapable generated_columns {
+  do_test index-vcov-3.1 {
+    execsql {
+      CREATE TABLE t_gen_func (
+        id INTEGER PRIMARY KEY,
+        data TEXT,
+        gen_len AS (length(data)) VIRTUAL
+      );
+      INSERT INTO t_gen_func(id, data) VALUES (1, 'abc'), (2, 'defg'), (3, 'hijkl');
+      CREATE INDEX idx_gen_len ON t_gen_func(gen_len);
+    }
+  } {}
+
+  do_eqp_test index-vcov-3.2 {
+    SELECT gen_len FROM t_gen_func INDEXED BY idx_gen_len WHERE gen_len = 4;
+  } {/SEARCH t_gen_func USING COVERING INDEX idx_gen_len/}
+
+  do_test index-vcov-3.3 {
+    execsql {
+      SELECT gen_len FROM t_gen_func INDEXED BY idx_gen_len WHERE gen_len = 4 ORDER BY id;
+    }
+  } {4}
+  
+  do_test index-vcov-3.4 {
+    execsql {
+      SELECT id, gen_len FROM t_gen_func INDEXED BY idx_gen_len WHERE data = 'abc'; -- data not in index
+    }
+  } {{1 3}}
+}
+
+# Tests for generated column not in index
+ifcapable {generated_columns && without_rowid} {
+  do_test index-vcov-4.1 {
+    execsql {
+      CREATE TABLE t_gen_other_wr (
+        id INTEGER PRIMARY KEY,
+        data TEXT,
+        gen1 AS (id+length(data)) VIRTUAL,
+        gen2 AS (id*length(data)) VIRTUAL
+      ) WITHOUT ROWID;
+      INSERT INTO t_gen_other_wr(id, data) VALUES (1, 'a'), (2, 'bb'), (3, 'ccc');
+      CREATE INDEX idx_gen_other_1_wr ON t_gen_other_wr(gen1);
+    }
+  } {}
+
+  # gen1 from index, gen2 requires computation/table access
+  do_eqp_test index-vcov-4.2 {
+    SELECT gen1, gen2 FROM t_gen_other_wr INDEXED BY idx_gen_other_1_wr WHERE id = 2;
+  } {/SEARCH t_gen_other_wr USING INDEX idx_gen_other_1_wr/}
+  # Verify the above EQP does not say COVERING
+  do_eqp_test index-vcov-4.2.notcovering {
+    SELECT gen1, gen2 FROM t_gen_other_wr INDEXED BY idx_gen_other_1_wr WHERE id = 2;
+  } {/(?!COVERING)SEARCH t_gen_other_wr USING INDEX idx_gen_other_1_wr/}
+
+
+  do_test index-vcov-4.3 {
+    execsql {
+      SELECT gen1, gen2 FROM t_gen_other_wr INDEXED BY idx_gen_other_1_wr WHERE id = 2;
+    }
+  } {{4 4}}
+
+  do_test index-vcov-4.4 {
+    execsql {
+      SELECT gen1 FROM t_gen_other_wr INDEXED BY idx_gen_other_1_wr WHERE gen1 = 4;
+    }
+  } {4}
+  
+  do_eqp_test index-vcov-4.5 {
+     SELECT gen1 FROM t_gen_other_wr INDEXED BY idx_gen_other_1_wr WHERE gen1 = 4;
+  } {/SEARCH t_gen_other_wr USING COVERING INDEX idx_gen_other_1_wr/}
+
+}
+
+ifcapable generated_columns {
+  do_test index-vcov-5.1 {
+    execsql {
+      CREATE TABLE t_gen_other_std (
+        id INTEGER PRIMARY KEY,
+        data TEXT,
+        gen1 AS (id+length(data)) VIRTUAL,
+        gen2 AS (id*length(data)) VIRTUAL
+      );
+      INSERT INTO t_gen_other_std(id, data) VALUES (1, 'a'), (2, 'bb'), (3, 'ccc');
+      CREATE INDEX idx_gen_other_1_std ON t_gen_other_std(gen1);
+    }
+  } {}
+
+  # gen1 from index, gen2 requires computation/table access
+  do_eqp_test index-vcov-5.2 {
+    SELECT gen1, gen2 FROM t_gen_other_std INDEXED BY idx_gen_other_1_std WHERE id = 2;
+  } {/SEARCH t_gen_other_std USING INDEX idx_gen_other_1_std/}
+   # Verify the above EQP does not say COVERING
+  do_eqp_test index-vcov-5.2.notcovering {
+    SELECT gen1, gen2 FROM t_gen_other_std INDEXED BY idx_gen_other_1_std WHERE id = 2;
+  } {/(?!COVERING)SEARCH t_gen_other_std USING INDEX idx_gen_other_1_std/}
+
+
+  do_test index-vcov-5.3 {
+    execsql {
+      SELECT gen1, gen2 FROM t_gen_other_std INDEXED BY idx_gen_other_1_std WHERE id = 2;
+    }
+  } {{4 4}}
+  
+  do_test index-vcov-5.4 {
+    execsql {
+      SELECT gen1 FROM t_gen_other_std INDEXED BY idx_gen_other_1_std WHERE gen1 = 4;
+    }
+  } {4}
+
+  do_eqp_test index-vcov-5.5 {
+     SELECT gen1 FROM t_gen_other_std INDEXED BY idx_gen_other_1_std WHERE gen1 = 4;
+  } {/SEARCH t_gen_other_std USING COVERING INDEX idx_gen_other_1_std/}
+}
+
+# Additional test for WITHOUT ROWID table where PK is part of the generated column.
+# And index is on the generated column only.
+# Query selects only the generated column, but filters on PK.
+ifcapable {generated_columns && without_rowid} {
+  do_test index-vcov-6.1 {
+    execsql {
+      CREATE TABLE t_gen_wr2 (
+        id INTEGER,
+        data TEXT,
+        id2 INTEGER,
+        gen_virt AS (id || ':' || upper(data) || ':' || id2) VIRTUAL,
+        PRIMARY KEY(id, id2)
+      ) WITHOUT ROWID;
+      INSERT INTO t_gen_wr2(id, data, id2) VALUES (1, 'one', 101), (2, 'two', 202), (3, 'three', 303);
+      CREATE INDEX idx_gen_virt_vc_wr2 ON t_gen_wr2(gen_virt);
+    }
+  } {}
+
+  # EQP: Select gen_virt, filter by id. idx_gen_virt_vc_wr2 contains gen_virt.
+  # The expression for gen_virt contains 'id'.
+  # Since 'id' is part of PK for WITHOUT ROWID, it's implicitly available to covering index checks.
+  # The planner should realize idx_gen_virt_vc_wr2 can be covering if gen_virt is the only thing selected.
+  # The WHERE clause on 'id' is the tricky part.
+  # If 'id' can be satisfied by the index for the WHERE clause, then it's covering.
+  # However, idx_gen_virt_vc_wr2 is *only* on gen_virt.
+  # This will likely require a PK lookup (which is the table itself for WR) for the WHERE clause,
+  # and then the gen_virt can be computed or fetched.
+  # If the optimization works, gen_virt is fetched from the index, after PK lookup.
+  # The EQP might show "SEARCH ... USING INDEX ... (id=?)" if it uses the PK,
+  # or "SCAN ... USING COVERING INDEX" if it somehow uses the gen_virt index to satisfy `id` (less likely).
+  # Let's test selecting only gen_virt and filtering by gen_virt.
+  do_eqp_test index-vcov-6.2 {
+    SELECT gen_virt FROM t_gen_wr2 INDEXED BY idx_gen_virt_vc_wr2 WHERE gen_virt = '2:TWO:202';
+  } {/SEARCH t_gen_wr2 USING COVERING INDEX idx_gen_virt_vc_wr2/}
+
+  # Now, the more complex case: select gen_virt, filter by id.
+  # If the generated column's own definition (id || ':' || upper(data) || ':' || id2)
+  # is part of the idx_gen_virt_vc_wr2 (which it is, as it's the indexed column),
+  # and the query only selects gen_virt, it should be covering.
+  # The WHERE id=2 part: for WITHOUT ROWID, id is part of PK.
+  # The query plan should be "SEARCH ... USING PRIMARY KEY ... then compute/filter gen_virt"
+  # OR "SCAN ... USING COVERING INDEX idx_gen_virt_vc_wr2 ... then filter gen_virt and id (if id also in gen_virt)"
+  #
+  # The key is whether the value of `gen_virt` is read from the index `idx_gen_virt_vc_wr2`
+  # or recomputed after a PK lookup.
+  # If the previous change (sqlite3ExprCodeGetColumnOfTable) works,
+  # after a PK lookup for `id=2`, when `gen_virt` is needed, it should be
+  # recognized as being available in `idx_gen_virt_vc_wr2` if that index is also being used.
+  # But here we are *forcing* idx_gen_virt_vc_wr2.
+  # This index does not help with `WHERE id=2`. So it's a SCAN.
+  # Once a row is found, `gen_virt` is needed. It should come from the index.
+  do_eqp_test index-vcov-6.3 {
+    SELECT gen_virt FROM t_gen_wr2 INDEXED BY idx_gen_virt_vc_wr2 WHERE id = 2;
+  } {/SCAN t_gen_wr2 USING COVERING INDEX idx_gen_virt_vc_wr2/}
+
+  do_test index-vcov-6.4 {
+    execsql { SELECT gen_virt FROM t_gen_wr2 INDEXED BY idx_gen_virt_vc_wr2 WHERE id = 2; }
+  } {2:TWO:202}
+
+  # Test with an index on (id, gen_virt) for WR table
+  do_test index-vcov-6.5 {
+    execsql { CREATE INDEX idx_id_gen_virt_wr2 ON t_gen_wr2(id, gen_virt); }
+  } {}
+
+  do_eqp_test index-vcov-6.6 {
+    SELECT id, gen_virt FROM t_gen_wr2 INDEXED BY idx_id_gen_virt_wr2 WHERE id = 1;
+  } {/SEARCH t_gen_wr2 USING COVERING INDEX idx_id_gen_virt_wr2/}
+
+  do_test index-vcov-6.7 {
+    execsql { SELECT id, gen_virt FROM t_gen_wr2 INDEXED BY idx_id_gen_virt_wr2 WHERE id = 1; }
+  } {{1 1:ONE:101}}
+
+}
+
+
 finish_test
