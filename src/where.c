@@ -6755,6 +6755,9 @@ WhereInfo *sqlite3WhereBegin(
          offsetof(WhereInfo,sWC) - offsetof(WhereInfo,nOBSat));
   memset(&pWInfo->a[0], 0, sizeof(WhereLoop)+nTabList*sizeof(WhereLevel));
   assert( pWInfo->eOnePass==ONEPASS_OFF );  /* ONEPASS defaults to OFF */
+
+  pParse->pWInfo = pWInfo;
+
   pMaskSet = &pWInfo->sMaskSet;
   pMaskSet->n = 0;
   pMaskSet->ix[0] = -99; /* Initialize ix[0] to a value that can never be
@@ -7681,5 +7684,6 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
   pParse->nQueryLoop = pWInfo->savedNQueryLoop;
   whereInfoFree(db, pWInfo);
   pParse->withinRJSubrtn -= nRJ;
+  pWInfo->pParse->pWInfo = 0;
   return;
 }

@@ -3989,6 +3989,7 @@ struct Parse {
 #ifndef SQLITE_OMIT_ALTERTABLE
   RenameToken *pRename;     /* Tokens subject to renaming by ALTER TABLE */
 #endif
+  WhereInfo *pWInfo;  /* Current WhereInfo being built */
 };
 
 /* Allowed values for Parse.eParseMode
@@ -5396,6 +5397,8 @@ char *sqlite3Utf16to8(sqlite3 *, const void*, int, u8);
 #endif
 int sqlite3ValueFromExpr(sqlite3 *, const Expr *, u8, u8, sqlite3_value **);
 void sqlite3ValueApplyAffinity(sqlite3_value *, u8, u8);
+void sqlite3ColumnApplyAffinity(Vdbe*, int, char);
+
 #ifndef SQLITE_AMALGAMATION
 extern const unsigned char sqlite3OpcodeProperty[];
 extern const char sqlite3StrBINARY[];
