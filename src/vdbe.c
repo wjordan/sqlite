@@ -456,12 +456,6 @@ void sqlite3ValueApplyAffinity(
   applyAffinity((Mem *)pVal, affinity, enc);
 }
 
-void sqlite3ColumnApplyAffinity(Vdbe *v, int reg, char affinity) {
-  if( affinity==SQLITE_AFF_NONE ) return;
-  sqlite3VdbeAddOp2(v, OP_Affinity, reg, 1);
-  sqlite3VdbeChangeP4(v, -1, &affinity, 1);
-}
-
 /*
 ** pMem currently only holds a string type (or maybe a BLOB that we can
 ** interpret as a string if we want to).  Compute its corresponding

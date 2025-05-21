@@ -3639,7 +3639,6 @@ struct CoveringIndexCheck {
   int iTabCur;       /* Cursor number for the corresponding table */
   u8 bExpr;          /* Uses an indexed expression */
   u8 bUnidx;         /* Uses an unindexed column not within an indexed expr */
-  u8 isExplicitIdx;  /* True if pIdx is an explicitly specified index */
 };
 
 /*
@@ -3669,27 +3668,14 @@ static int whereIsCoveringIndexWalkCallback(Walker *pWalk, Expr *pExpr){
   pCk = pWalk->u.pCovIdxCk;
   pIdx = pCk->pIdx;
   if( (pExpr->op==TK_COLUMN || pExpr->op==TK_AGG_COLUMN) ){
+    /* if( pExpr->iColumn<(BMS-1) && pIdx->bHasExpr==0 ) return WRC_Continue;*/
     if( pExpr->iTable!=pCk->iTabCur ) return WRC_Continue;
-
-    /* Check if this is a virtual generated column and an explicit index is used */
-    if( pExpr->op==TK_COLUMN && pCk->isExplicitIdx && pExpr->y.pTab &&
-        (pExpr->y.pTab->aCol[pExpr->iColumn].colFlags & COLFLAG_VIRTUAL) ){
-      Expr *pVirtualColExpr = sqlite3ColumnExpr(pExpr->y.pTab, &pExpr->y.pTab->aCol[pExpr->iColumn]);
-      if( pVirtualColExpr && exprIsCoveredByIndex(pVirtualColExpr, pIdx, pCk->iTabCur) ){
-        /* The virtual column's expression is covered by an explicit index's expressions */
-        pCk->bExpr = 1; /* Mark that an indexed expression was used for coverage */
-        return WRC_Continue; /* This column is covered, continue checking other parts */
-      }
-    }
-
-    /* Original check for direct column coverage by the index */
+    pIdx = pWalk->u.pCovIdxCk->pIdx;
     aiColumn = pIdx->aiColumn;
     nColumn = pIdx->nColumn;
     for(i=0; i<nColumn; i++){
       if( aiColumn[i]==pExpr->iColumn ) return WRC_Continue;
     }
-
-    /* Column is not directly covered */
     pCk->bUnidx = 1;
     return WRC_Abort;
   }else if( pIdx->bHasExpr
@@ -3727,8 +3713,7 @@ static int whereIsCoveringIndexWalkCallback(Walker *pWalk, Expr *pExpr){
 static SQLITE_NOINLINE u32 whereIsCoveringIndex(
   WhereInfo *pWInfo,     /* The WHERE clause context */
   Index *pIdx,           /* Index that is being tested */
-  int iTabCur,           /* Cursor for the table being indexed */
-  u8 isExplicitIdx       /* True if pIdx is an explicitly specified index */
+  int iTabCur            /* Cursor for the table being indexed */
 ){
   int i, rc;
   struct CoveringIndexCheck ck;
@@ -3753,7 +3738,6 @@ static SQLITE_NOINLINE u32 whereIsCoveringIndex(
   ck.iTabCur = iTabCur;
   ck.bExpr = 0;
   ck.bUnidx = 0;
-  ck.isExplicitIdx = isExplicitIdx;
   memset(&w, 0, sizeof(w));
   w.xExprCallback = whereIsCoveringIndexWalkCallback;
   w.xSelectCallback = sqlite3SelectWalkNoop;
@@ -4089,27 +4073,24 @@ static int whereLoopAddBtree(
         }
         pNew->wsFlags = WHERE_INDEXED;
         if( m==TOPBIT || (pProbe->bHasExpr && !pProbe->bHasVCol && m!=0) ){
-          u32 isCov = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor, pSrc->fg.isIndexedBy);
+          u32 isCov = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor);
           if( isCov==0 ){
             WHERETRACE(0x200,
-              ("-> %s is not a covering index"
-                "(bFilterNoOmit=%x && m=%llx)\n",
-                pProbe->zName, bFilterNoOmit, (sqlite3_uint64)m));
+               ("-> %s is not a covering index"
+                " according to whereIsCoveringIndex()\n", pProbe->zName));
+            assert( m!=0 );
           }else{
-            /* If this is an explicitly specified index with expressions, 
-              set both flags to ensure it can be used as a covering index */
-            if( pSrc->fg.isIndexedBy && pProbe->bHasExpr && pProbe->aColExpr ) {
-              pNew->wsFlags |= WHERE_IDX_ONLY | WHERE_EXPRIDX;
-              WHERETRACE(0x200,("-> %s is forced as a covering expression index\n", pProbe->zName));
+            m = 0;
+            pNew->wsFlags |= isCov;
+            if( isCov & WHERE_IDX_ONLY ){
+              WHERETRACE(0x200,
+                 ("-> %s is a covering expression index"
+                  " according to whereIsCoveringIndex()\n", pProbe->zName));
             }else{
-              /* Handle normally for other cases */
-              if( isCov==WHERE_IDX_ONLY ){
-                pNew->wsFlags |= WHERE_IDX_ONLY;
-                WHERETRACE(0x200,("-> %s is a covering index\n", pProbe->zName));
-              }else if( isCov==WHERE_EXPRIDX || isCov==(WHERE_IDX_ONLY|WHERE_EXPRIDX) ){
-                pNew->wsFlags |= WHERE_EXPRIDX | WHERE_IDX_ONLY;
-                WHERETRACE(0x200,("-> %s is a covering index with expressions\n", pProbe->zName));
-              }
+              assert( isCov==WHERE_EXPRIDX );
+              WHERETRACE(0x200,
+                 ("-> %s might be a covering expression index"
+                  " according to whereIsCoveringIndex()\n", pProbe->zName));
             }
           }
         }else if( m==0 
@@ -4117,7 +4098,7 @@ static int whereLoopAddBtree(
         ){
           WHERETRACE(0x200,
              ("-> %s is a covering index according to bitmasks\n",
-             pProbe->zName));
+             pProbe->zName, m==0 ? "is" : "is not"));
           pNew->wsFlags = WHERE_IDX_ONLY | WHERE_INDEXED;
         }
       }
@@ -6758,9 +6739,6 @@ WhereInfo *sqlite3WhereBegin(
          offsetof(WhereInfo,sWC) - offsetof(WhereInfo,nOBSat));
   memset(&pWInfo->a[0], 0, sizeof(WhereLoop)+nTabList*sizeof(WhereLevel));
   assert( pWInfo->eOnePass==ONEPASS_OFF );  /* ONEPASS defaults to OFF */
-
-  pParse->pWInfo = pWInfo;
-
   pMaskSet = &pWInfo->sMaskSet;
   pMaskSet->n = 0;
   pMaskSet->ix[0] = -99; /* Initialize ix[0] to a value that can never be
@@ -7685,7 +7663,6 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
   /* Final cleanup
   */
   pParse->nQueryLoop = pWInfo->savedNQueryLoop;
-  pParse->pWInfo = 0;
   whereInfoFree(db, pWInfo);
   pParse->withinRJSubrtn -= nRJ;
   return;
