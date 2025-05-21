@@ -4092,21 +4092,17 @@ static int whereLoopAddBtree(
           u32 isCov = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor, pSrc->fg.isIndexedBy);
           if( isCov==0 ){
             WHERETRACE(0x200,
-               ("-> %s is not a covering index"
-                " according to whereIsCoveringIndex()\n", pProbe->zName));
-            assert( m!=0 );
+              ("-> %s is not a covering index"
+                "(bFilterNoOmit=%x && m=%llx)\n",
+                pProbe->zName, bFilterNoOmit, (sqlite3_uint64)m));
           }else{
-            m = 0;
-            pNew->wsFlags |= isCov;
-            if( isCov & WHERE_IDX_ONLY ){
-              WHERETRACE(0x200,
-                 ("-> %s is a covering expression index"
-                  " according to whereIsCoveringIndex()\n", pProbe->zName));
-            }else{
-              assert( isCov==WHERE_EXPRIDX );
-              WHERETRACE(0x200,
-                 ("-> %s might be a covering expression index"
-                  " according to whereIsCoveringIndex()\n", pProbe->zName));
+            /* Set the appropriate flags based on the covering index type */
+            if( isCov==WHERE_IDX_ONLY ){
+              pNew->wsFlags |= WHERE_IDX_ONLY;
+              WHERETRACE(0x200,("-> %s is a covering index\n", pProbe->zName));
+            }else if( isCov==WHERE_EXPRIDX ){
+              pNew->wsFlags |= WHERE_EXPRIDX | WHERE_IDX_ONLY;
+              WHERETRACE(0x200,("-> %s is a covering index with expressions\n", pProbe->zName));
             }
           }
         }else if( m==0 
