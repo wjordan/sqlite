@@ -3762,7 +3762,7 @@ static SQLITE_NOINLINE u32 whereIsCoveringIndex(
   if( ck.bUnidx ){
     rc = 0;
   }else if( ck.bExpr ){
-    rc = WHERE_EXPRIDX;
+    rc = WHERE_IDX_ONLY | WHERE_EXPRIDX;
   }else{
     rc = WHERE_IDX_ONLY;
   }
